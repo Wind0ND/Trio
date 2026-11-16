@@ -40,13 +40,26 @@ public enum SyaiKeychain {
         return "Syai Tag:i:n:\(uuid)"
     }
 
-    public static func saveAccount(_ session: SyaiAccountSession) {
-        guard let data = try? JSONEncoder().encode(session) else { return }
-        save(data, account: accountSessionKey)
+    /// The bare UUID half of the install id: `Syai Tag:i:n:<uuid>` -> `<uuid>`.
+    /// The mainland identity prefix is `ottai:a:g:` followed by the UUID alone.
+    public static func loadOrCreateInstallUUID() -> String {
+        let full = loadOrCreateInstallDeviceId()
+        return full.components(separatedBy: ":").last ?? full
     }
 
-    public static func loadAccount() -> SyaiAccountSession? {
-        guard let data = load(account: accountSessionKey) else { return nil }
+    /// Keychain slot for one manager type. Syai Ultra and Ottai are separate
+    /// accounts on separate backends and must not overwrite each other's session.
+    private static func accountKey(_ namespace: String) -> String {
+        namespace.isEmpty ? accountSessionKey : "\(accountSessionKey).\(namespace)"
+    }
+
+    public static func saveAccount(_ session: SyaiAccountSession, namespace: String = "") {
+        guard let data = try? JSONEncoder().encode(session) else { return }
+        save(data, account: accountKey(namespace))
+    }
+
+    public static func loadAccount(namespace: String = "") -> SyaiAccountSession? {
+        guard let data = load(account: accountKey(namespace)) else { return nil }
         return try? JSONDecoder().decode(SyaiAccountSession.self, from: data)
     }
 

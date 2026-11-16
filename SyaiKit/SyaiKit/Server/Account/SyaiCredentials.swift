@@ -58,7 +58,10 @@ public struct SyaiCredentials: Sendable {
         (accessTokenExpiry?.timeIntervalSinceNow ?? -1) > 60
     }
 
-    public var isConfigured: Bool { !refreshToken.isEmpty }
+    /// A mainland (Ottai) session has no refresh token at all - it is an
+    /// `accessToken` JWT only - so treating an empty refresh token as "not
+    /// configured" would report every CN login as signed out.
+    public var isConfigured: Bool { !refreshToken.isEmpty || !(accessToken ?? "").isEmpty }
 
     // The JWT payload is not confidential (RFC 7519) and we only read it for
     // identity; no signature verification here (the server enforces that).

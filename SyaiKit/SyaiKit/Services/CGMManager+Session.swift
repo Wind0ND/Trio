@@ -46,7 +46,7 @@ extension SyaiCGMManager {
     }
 
     @MainActor func installSession(_ session: SyaiAccountSession) {
-        SyaiKeychain.saveAccount(session)
+        SyaiKeychain.saveAccount(session, namespace: Self.pluginIdentifier)
         account = session
         calibrationProvider = makeServerCalibrationProvider()
         telemetryService = makeTelemetryService()
@@ -83,7 +83,7 @@ extension SyaiCGMManager {
     }
 
     public func logOut() {
-        SyaiKeychain.deleteAccount()
+        SyaiKeychain.deleteAccount(namespace: Self.pluginIdentifier)
         account = nil
         if calibrationProvider is SyaiServerCalibrationProvider {
             calibrationProvider = nil
@@ -104,7 +104,7 @@ extension SyaiCGMManager {
                 guard let current = self.account else { return }
                 let updated = current.withRotatedCredentials(rotated, glucoseSecretKey: gsk)
                 guard updated != current else { return }
-                SyaiKeychain.saveAccount(updated)
+                SyaiKeychain.saveAccount(updated, namespace: Self.pluginIdentifier)
                 self.account = updated
             }
         }
@@ -122,7 +122,7 @@ extension SyaiCGMManager {
                     // survives CGM deletion and reinstall. Leaving it would restore
                     // a dead login on the next add. The in-memory account stays for
                     // display until the user re-authenticates.
-                    SyaiKeychain.deleteAccount()
+                    SyaiKeychain.deleteAccount(namespace: Self.pluginIdentifier)
                 }
             }
         }

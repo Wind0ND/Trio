@@ -195,7 +195,7 @@ public struct SyaiBackend: Sendable {
         productModel: "MB",
         credentials: .placeholder,
         appName: "ottai",
-        deviceId: "ottai:a:g:" + SyaiKeychain.loadOrCreateInstallDeviceId(),
+        deviceId: "ottai:a:g:" + SyaiKeychain.loadOrCreateInstallUUID(),
         packageName: "com.ottai.tag",
         versionName: "1.55.0",
         versionCode: "263121",

@@ -244,7 +244,7 @@ open class SyaiCGMManager: CGMManager, @unchecked Sendable {
     private init(initialState: CGMManagerState) {
         state = initialState
         recentSamples = initialState.recentSamples
-        account = SyaiKeychain.loadAccount()
+        account = SyaiKeychain.loadAccount(namespace: type(of: self).pluginIdentifier)
         syncSensorHistoryFile()
         if state.mac != nil {
             wireStackForRestoreIfNeeded()

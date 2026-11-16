@@ -110,9 +110,21 @@ public struct SyaiBoundSensorLookup: Sendable {
         }
         let code = (root["code"] as? String) ?? "OK"
         guard code == "OK" else { throw LookupError.business(code: code) }
-        guard let body = root["data"] as? [String: Any],
-              let mac = body["mac"] as? String, !mac.isEmpty
-        else { return nil }
+        guard let payload = root["data"] as? [String: Any] else { return nil }
+        // The mainland service nests the device under `cgmDeviceRespVO` and keeps
+        // `method` / `coefficient` in a sibling `cgmDeviceMethodVO` (which can also
+        // be non-empty when the device object's own fields are). Fold both into one
+        // flat record so the rest of the pipeline does not care which shape it got.
+        var body = (payload["cgmDeviceRespVO"] as? [String: Any]) ?? payload
+        if let method = payload["cgmDeviceMethodVO"] as? [String: Any] {
+            for (key, value) in method where !(value is NSNull) {
+                let existing = body[key]
+                if existing == nil || (existing as? String)?.isEmpty == true {
+                    body[key] = value
+                }
+            }
+        }
+        guard let mac = body["mac"] as? String, !mac.isEmpty else { return nil }
         return body
     }
 

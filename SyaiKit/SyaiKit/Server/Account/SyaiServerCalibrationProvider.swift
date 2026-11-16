@@ -300,12 +300,12 @@ public extension SyaiEnvelopedClient {
         let ts = SyaiBackend.timestampMillis()
         let paramStr = Self.upperHex(authDev)
         let shaInfo = Self.upperHex(authFlag)
-        let sign = backend.plainTextTransport
+        let sign = backend.isOttaiCn
             ? backend.signPlainAuthVerify(mac: mac, authDevHex: paramStr, authFlagHex: shaInfo, timestamp: ts)
             : backend.signCgmAuthVerify(mac: mac, authDevHex: paramStr, authFlagHex: shaInfo, timestamp: ts)
         // The CN service also wants the signed timestamp echoed in the body.
         var body: [String: Any] = ["mac": mac, "paramStr": paramStr, "shaInfo": shaInfo, "sign": sign]
-        if backend.plainTextTransport { body["timestamp"] = ts }
+        if backend.isOttaiCn { body["timestamp"] = ts }
         return try await envelopedPOST(
             path: "cgmAuth/verify",
             body: body,
