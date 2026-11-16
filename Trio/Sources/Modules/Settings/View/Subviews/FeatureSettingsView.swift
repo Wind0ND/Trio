@@ -19,6 +19,7 @@ struct FeatureSettingsView: BaseView {
     @AppStorage("backgroundKeepAlive.mode") private var keepAliveMode: String = BackgroundKeepAlive.Mode.smart.rawValue
     @AppStorage("backgroundKeepAlive.stallMinutes") private var stallMinutes: Int = 10
     @AppStorage("backgroundKeepAlive.maxSessionMinutes") private var maxSessionMinutes: Int = 45
+    @AppStorage("ottaiExtraWearDays") private var ottaiExtraWearDays: Int = 0
 
     var body: some View {
         Form {
@@ -64,6 +65,23 @@ struct FeatureSettingsView: BaseView {
                         )
                     }
                     Text("Trio 在后台保持运行，CGM 掉线后能更快重连。智能模式只在数据停更时启动，仍会带来额外耗电。")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            )
+            .listRowBackground(Color.chart)
+            Section(
+                header: Text("CGM 寿命"),
+                content: {
+                    Stepper(
+                        ottaiExtraWearDays == 0
+                            ? "欧态传感器延长期：关闭"
+                            : "欧态传感器延长期：+\(ottaiExtraWearDays) 天",
+                        value: $ottaiExtraWearDays,
+                        in: 0 ... 28,
+                        step: 7
+                    )
+                    Text("只改 App 的到期判断，不碰云端额定寿命，也不改传感器固件。与原厂 App 同时开着时以原厂为准。")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }

@@ -32,7 +32,7 @@ public struct SyaiSensorRecord: Equatable, Sendable, Identifiable, RawRepresenta
     /// this sensor as active rather than treat it as merely historical.
     public var isWithinWearWindow: Bool {
         guard let activatedAt else { return false }
-        return activatedAt.addingTimeInterval(deviceInfo.activeDuration) > Date()
+        return activatedAt.addingTimeInterval(SyaiWearExtension.extendedWear(deviceInfo.activeDuration)) > Date()
     }
 
     public init(
@@ -227,7 +227,8 @@ public struct SyaiSensorStore: Equatable, Sendable, RawRepresentable {
                 && !records[idx].isWithinWearWindow
         {
             if let activatedAt = records[idx].activatedAt {
-                records[idx].retiredAt = activatedAt.addingTimeInterval(records[idx].deviceInfo.activeDuration)
+                records[idx].retiredAt = activatedAt
+                    .addingTimeInterval(SyaiWearExtension.extendedWear(records[idx].deviceInfo.activeDuration))
             }
         }
 

@@ -8,6 +8,27 @@
 
 import Foundation
 
+/// Local override for the rated wear window.
+///
+/// `activeDuration` comes from the cloud (`activeExpireTime`), which is only
+/// what the account plan rates the sensor at - the firmware keeps streaming
+/// past it. Both the official app and we enforce that number client-side, so
+/// raising the extra-days preference extends every wear-window decision
+/// without touching the cloud record or the sensor itself.
+public enum SyaiWearExtension {
+    /// Days added on top of the cloud-rated wear window. 0 (default) = off.
+    public static let defaultsKey = "ottaiExtraWearDays"
+
+    public static var extraSeconds: TimeInterval {
+        let days = UserDefaults.standard.integer(forKey: defaultsKey)
+        return days > 0 ? TimeInterval(days) * 86_400 : 0
+    }
+
+    public static func extendedWear(_ wear: TimeInterval) -> TimeInterval {
+        wear + extraSeconds
+    }
+}
+
 public enum SyaiSensorLifecycle: Equatable {
     case noSensor
     case warmup(progress: Double, remaining: TimeInterval)
@@ -56,7 +77,7 @@ public enum SyaiSensorLifecycle: Equatable {
         case .signalImplausible: return .failed
         case .deviceStateUnactivated: return .unactivated
         case .deviceStateObsolete: // generic state for "not working"
-            if let activatedAt, let wear = activeDuration,
+            if let activatedAt, let wear = activeDuration.map(SyaiWearExtension.extendedWear),
                let age = Self.age(activatedAt: activatedAt, sensorAge: sensorAge, now: now),
                age >= wear // beyond expiration date
             {
@@ -71,7 +92,8 @@ public enum SyaiSensorLifecycle: Equatable {
         // always returns real durations, so they're present or absent together. No
         // placeholder default: a missing duration means the lifecycle isn't known
         // yet, not that a generic 14-day/30-min guess applies.
-        guard let activatedAt, let wear = activeDuration, let warmup = preheatDuration else {
+        guard let activatedAt, let wear = activeDuration.map(SyaiWearExtension.extendedWear),
+              let warmup = preheatDuration else {
             return .noSensor
         }
         let age = Self.age(activatedAt: activatedAt, sensorAge: sensorAge, now: now) ?? 0

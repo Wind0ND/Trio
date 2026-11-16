@@ -267,7 +267,7 @@ extension SyaiCGMManager {
 
     static func isPastWear(elapsedSeconds: TimeInterval?, activeDuration: TimeInterval?) -> Bool {
         guard let elapsedSeconds, let activeDuration else { return false }
-        return elapsedSeconds >= activeDuration
+        return elapsedSeconds >= SyaiWearExtension.extendedWear(activeDuration)
     }
 
     /// First sequence index worth requesting in a historical backfill.

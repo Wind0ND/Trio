@@ -22,7 +22,7 @@ public struct SyaiBoundSensor: Equatable, Sendable {
     /// Whether the wear window has already run out by the server's account.
     public var isPastWear: Bool {
         guard let activatedAt else { return false }
-        return activatedAt.addingTimeInterval(deviceInfo.activeDuration) <= Date()
+        return activatedAt.addingTimeInterval(SyaiWearExtension.extendedWear(deviceInfo.activeDuration)) <= Date()
     }
 }
 
