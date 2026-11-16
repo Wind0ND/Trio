@@ -241,7 +241,11 @@ public extension SyaiEnvelopedClient {
         guard backend.isConfigured else { throw TransportError.notConfigured }
         try await ensureAccessToken() // gated call: needs a live Authorization token
         let ts = SyaiBackend.timestampMillis()
-        let signature = backend.signAuthInfo(mac: mac, timestamp: ts)
+        // CN transport signs flat (appName+deviceId+ts+args+seed); the enveloped
+        // transport uses the sandwiched-key md5.
+        let signature = backend.plainTextTransport
+            ? backend.signPlain(timestamp: ts, [mac])
+            : backend.signAuthInfo(mac: mac, timestamp: ts)
         let data = try await envelopedGET(
             path: "device/authInfo",
             body: ["mac": mac, "sign": signature],

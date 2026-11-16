@@ -193,6 +193,10 @@ public extension SyaiEnvelopedClient {
     func getBindDevice() async throws -> Data {
         guard backend.isConfigured else { throw TransportError.notConfigured }
         try await ensureAccessToken()
+        if backend.plainTextTransport {
+            // CN service exposes this one as a genuine GET with no body.
+            return try await plainGET(path: "deviceBind/getBindDevice", authed: true)
+        }
         return try await envelopedGET(path: "deviceBind/getBindDevice", body: [:])
     }
 }

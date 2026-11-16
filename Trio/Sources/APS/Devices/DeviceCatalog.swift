@@ -47,6 +47,7 @@ enum DeviceManufacturer: CaseIterable {
     case roche
     case senseonics
     case sooil
+    case ottai
     case syai
     case otherSources
     case simulator
@@ -62,6 +63,7 @@ enum DeviceManufacturer: CaseIterable {
         case .roche: return "Roche"
         case .senseonics: return "Senseonics"
         case .sooil: return "SOOIL"
+        case .ottai: return "Ottai"
         case .syai: return "Syai"
         case .otherSources: return String(localized: "Other Sources", comment: "Device picker section for data relays")
         case .simulator: return String(localized: "Simulator", comment: "Device picker section for simulated devices")
@@ -401,6 +403,14 @@ extension DeviceCatalog {
             .managed(SyaiCGMManager.self, id: "SyaiCGMManager"),
             manufacturer: .syai,
             name: "Syai Ultra",
+            icon: .uiBundle(identifier: "org.loopkit.SyaiKitUI", asset: "sensor")
+        ),
+
+        CGMCatalogEntry(
+            .managed(OttaiCGMManager.self, id: "OttaiCGMManager"),
+            manufacturer: .ottai,
+            name: "Ottai",
+            supportedModels: ["M8"],
             icon: .uiBundle(identifier: "org.loopkit.SyaiKitUI", asset: "sensor")
         ),
 
