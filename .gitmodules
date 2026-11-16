@@ -34,10 +34,6 @@
 	path = DanaKit
 	url = https://github.com/loopandlearn/DanaKit
 	branch = trio-next-dev
-[submodule "MedtrumKit"]
-	path = MedtrumKit
-	url = https://github.com/loopandlearn/MedtrumKit
-	branch = trio-next-dev
 [submodule "OmnipodKit"]
 	path = OmnipodKit
 	url = https://github.com/loopandlearn/OmnipodKit

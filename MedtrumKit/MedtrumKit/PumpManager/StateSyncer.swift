@@ -1,0 +1,330 @@
+import LoopKit
+
+enum StateSyncer {
+    private static let logger = MedtrumLogger(category: "StateSyncer")
+
+    static func sync(
+        syncResponse: SynchronizePacketResponse,
+        state: MedtrumPumpState,
+        pumpManager: MedtrumPumpManager,
+        duringReconnect: Bool,
+        fullSync: Bool
+    ) {
+        let syncDate = Date.now
+
+        // Checked on the payload as received: a rebooted base reports a new patch id, and validation
+        // would strip exactly the fields that tell a reset apart - and when it happened
+        switch baseResetCheck(syncResponse: syncResponse, state: state) {
+        case .reset:
+            guard !pumpManager.isDeactivatingPatch else {
+                break
+            }
+
+            // Nothing else in this payload describes the patch we knew
+            pumpManager.handleBaseReset(
+                deliveryStoppedAt: deliveryStoppedAt(syncResponse: syncResponse, state: state, receivedAt: syncDate)
+            )
+            return
+
+        case .unconfirmed:
+            // `.none` is also what an unknown state byte parses to, don't drop an activated patch over it
+            logger.warning("Activated patch reported state none without a new patch id, ignoring")
+            return
+
+        case .noReset:
+            break
+        }
+
+        // No session: the id kept can be stale - the previous patch's, or one never started - and would reject the new
+        // patch's payloads. The storage gate below decides which id to keep then.
+        let expectedPatchId = state.patchSessionEnded ? 0 : state.patchId.toUInt64()
+        let syncResponse = syncResponse.validated(expectedPatchId: expectedPatchId)
+
+        StateSyncer.updatePumpState(syncResponse: syncResponse, pumpManager: pumpManager)
+
+        let hasActivatedPatch = syncResponse.state.rawValue >= PatchState.active.rawValue
+
+        if let reservoir = syncResponse.reservoir {
+            if hasActivatedPatch,
+               let lowReservoirWarning = state.lowReservoirWarning,
+               state.reservoir > lowReservoirWarning,
+               reservoir < lowReservoirWarning
+            {
+                // Send low reservoir warning notification to user
+                pumpManager.emitAlert(alertType: .lowReservoir(level: reservoir))
+            }
+
+            if state.reservoir != reservoir {
+                state.reservoir = reservoir
+
+                if fullSync, hasActivatedPatch {
+                    // to prevent spaming the OSAID app with reservoir updates
+                    pumpManager.emitReservoirLevel()
+                }
+            }
+
+            if hasActivatedPatch, state.initialReservoir == nil {
+                state.initialReservoir = reservoir
+            }
+        }
+
+        var events: [NewPumpEvent] = []
+        if syncResponse.state.isDeliveryHalted {
+            // a halted state is authoritative even when the notification carries a cached basal.
+            events.append(contentsOf: recordSuspendIfDelivering(
+                state: state, basal: syncResponse.basal, receivedAt: syncDate
+            ))
+            state.basalState = .suspended
+        } else if let basal = syncResponse.basal {
+            switch basal.type {
+            case .ABSOLUTE_TEMP,
+                 .RELATIVE_TEMP:
+                state.basalState = .tempBasal
+
+            case .STOP,
+                 .STOP_BASE_FAULT,
+                 .STOP_BATTERY_EMPTY,
+                 .STOP_DISCARD,
+                 .STOP_EMPTY,
+                 .STOP_EXPIRED,
+                 .STOP_OCCLUSION,
+                 .STOP_PATCH_FAULT,
+                 .STOP_PATCH_FAULT2,
+                 .SUSPEND_AUTO,
+                 .SUSPEND_KEY_LOST,
+                 .SUSPEND_LOW_GLUCOSE,
+                 .SUSPEND_MANUAL,
+                 .SUSPEND_MORE_THAN_MAX_PER_DAY,
+                 .SUSPEND_MORE_THAN_MAX_PER_HOUR,
+                 .SUSPEND_PREDICT_LOW_GLUCOSE:
+                events.append(contentsOf: recordSuspendIfDelivering(
+                    state: state, basal: basal, receivedAt: syncDate
+                ))
+                state.basalState = .suspended
+
+            default:
+                // The patch is delivering on its schedule again
+                let eventTime = syncDate
+
+                switch state.basalDose.type {
+                case .tempBasal:
+                    // A temp basal was running - finalize it, and go back to scheduled basal
+                    let finishedTempBasal = state.basalDose.toDoseEntry(isMutable: false, endDate: eventTime)
+                    state.basalDose = UnfinalizedDose(
+                        basalRate: state.currentBaseBasalRate,
+                        insulinType: state.insulinType
+                    )
+
+                    events.append(NewPumpEvent.basal(dose: state.basalDose.toDoseEntry()))
+                    // Record finalized temp basal, the scheduled basal above is already finalized
+                    events.append(NewPumpEvent.tempBasal(dose: finishedTempBasal))
+
+                case .suspend:
+                    // Delivery was suspended - report the resume. The suspend is already finalized.
+                    state.basalDose = UnfinalizedDose(
+                        resumeStartTime: eventTime,
+                        insulinType: state.insulinType
+                    )
+
+                    events.append(NewPumpEvent.resume(dose: state.basalDose.toDoseEntry()))
+
+                default:
+                    break
+                }
+
+                state.basalState = .active
+            }
+        }
+
+        if let prime = syncResponse.primeProgress {
+            state.primeProgress = prime
+        }
+
+        if let battery = syncResponse.battery {
+            state.battery = battery.voltageB
+        }
+
+        if let startTime = syncResponse.startTime {
+            state.patchActivatedAt = startTime
+        }
+
+        if let storage = syncResponse.storage {
+            // No session: the old patch can report its id until it disconnects. A running patch with another id is the new
+            // one, its session not started.
+            let patchId = UInt64(storage.patchId).toData(length: 4)
+            if !state.patchSessionEnded || (syncResponse.state.isRunning && patchId != state.previousPatch?.patchId) {
+                state.patchId = patchId
+            }
+        }
+
+        if let bolusProgress = syncResponse.bolus {
+            pumpManager.updateBolusProgress(
+                delivered: bolusProgress.delivered,
+                completed: bolusProgress.completed,
+                useEstimatedEndDate: duringReconnect
+            )
+        } else if duringReconnect {
+            pumpManager.checkBolusDone()
+        }
+
+        if fullSync || !events.isEmpty {
+            pumpManager.state.lastSync = syncDate
+            pumpManager.emitPumpEvents(events)
+        }
+
+        pumpManager.notifyStateDidChange()
+    }
+
+    private static func recordSuspendIfDelivering(
+        state: MedtrumPumpState,
+        basal: BasalData?,
+        receivedAt: Date
+    ) -> [NewPumpEvent] {
+        guard state.basalDose.type == .basal || state.basalDose.type == .resume || state.basalDose.type == .tempBasal
+        else {
+            return []
+        }
+
+        var events: [NewPumpEvent] = []
+        // accurate time would require pump-history reconciliation
+        let eventTime: Date
+        if let basal = basal,
+           basal.type.isSuspendedByPump(),
+           basal.startTime >= state.basalDose.startDate,
+           basal.startTime <= receivedAt
+        {
+            eventTime = basal.startTime
+        } else {
+            eventTime = receivedAt
+        }
+        let dose = state.basalDose.toDoseEntry(isMutable: false, endDate: eventTime)
+        state.basalDose = UnfinalizedDose(suspendStartTime: eventTime)
+
+        events.append(NewPumpEvent.suspend(dose: state.basalDose.toDoseEntry()))
+        if dose.type == .tempBasal {
+            events.append(NewPumpEvent.tempBasal(dose: dose))
+        }
+
+        return events
+    }
+
+    enum BaseResetCheck {
+        case noReset
+        case reset
+        case unconfirmed
+    }
+
+    /// An activated patch never goes back to a setup state on its own: when it does, the base has
+    /// rebooted and came back as a blank patch - with a new patch id, its age and sequence restarted,
+    /// and no delivery.
+    static func baseResetCheck(syncResponse: SynchronizePacketResponse, state: MedtrumPumpState) -> BaseResetCheck {
+        // No session: the old patch, stopped, is still reported until the new one is set up - that setup is no reset
+        guard !state.pumpState.isSetup, syncResponse.state.isSetup,
+              !(state.patchSessionEnded && state.pumpState.isTerminated)
+        else {
+            return .noReset
+        }
+
+        guard syncResponse.state == .none else {
+            return .reset
+        }
+
+        guard let storage = syncResponse.storage, !state.patchId.isEmpty else {
+            return .unconfirmed
+        }
+
+        return UInt64(storage.patchId) != state.patchId.toUInt64() ? .reset : .unconfirmed
+    }
+
+    /// The base counts the patch age from its boot, which is when delivery stopped - unless we have
+    /// heard from the activated patch after that
+    static func deliveryStoppedAt(
+        syncResponse: SynchronizePacketResponse,
+        state: MedtrumPumpState,
+        receivedAt: Date
+    ) -> Date {
+        guard let patchAge = syncResponse.patchAge else {
+            return receivedAt
+        }
+
+        let bootedAt = receivedAt.addingTimeInterval(-TimeInterval(patchAge))
+        return min(max(bootedAt, state.lastSync), receivedAt)
+    }
+
+    public static func fetchPatchTimeIfStale(pumpManager: MedtrumPumpManager) {
+        let age = Date.now.timeIntervalSince(pumpManager.state.pumpTimeSyncedAt)
+        guard age > MedtrumPumpManager.patchTimeRefreshInterval else {
+            return
+        }
+
+        fetchPatchTime(pumpManager: pumpManager)
+    }
+
+    public static func fetchPatchTime(pumpManager: MedtrumPumpManager) {
+        let timeData = pumpManager.bluetooth.write(GetTimePacket())
+
+        switch timeData {
+        case let .failure(error: error):
+            logger.warning("Failed to get current Patch time: \(error.errorDescription)")
+            return
+        case let .success(data: data):
+            guard let timeResponse = data as? GetTimePacketResponse else {
+                logger.error("Failed to get time: invalid response")
+                return
+            }
+
+            pumpManager.state.pumpTime = timeResponse.time
+            pumpManager.state.pumpTimeSyncedAt = Date.now
+            pumpManager.notifyStateDidChange()
+        }
+    }
+
+    public static func syncTime(pumpManager: MedtrumPumpManager) {
+        let timeData = pumpManager.bluetooth.write(SetTimePacket(date: Date.now))
+        switch timeData {
+        case let .failure(error: error):
+            logger.error("Failed to sync time: \(error.errorDescription)")
+            return
+        default:
+            break
+        }
+
+        let timeZoneData = pumpManager.bluetooth.write(
+            SetTimeZonePacket(date: Date.now, timeZone: TimeZone.current)
+        )
+        switch timeZoneData {
+        case let .failure(error: error):
+            logger.error("Failed to sync timezone: \(error.errorDescription)")
+            return
+        default:
+            StateSyncer.fetchPatchTime(pumpManager: pumpManager)
+        }
+    }
+
+    private static func updatePumpState(syncResponse: SynchronizePacketResponse, pumpManager: MedtrumPumpManager) {
+        let previousState = pumpManager.state.pumpState
+        pumpManager.state.pumpState = syncResponse.state
+
+        guard syncResponse.state != previousState else {
+            return
+        }
+
+        // Send notification for specific states
+        switch syncResponse.state {
+        case .dailyMaxSuspended:
+            pumpManager.emitAlert(alertType: .patchDailyMaxNotification)
+        case .hourlyMaxSuspended:
+            pumpManager.emitAlert(alertType: .patchHourlyMaxNotification)
+        case .occlusion:
+            pumpManager.emitAlert(alertType: .occlusionNotification)
+        case .baseFault,
+             .patchFault,
+             .patchFaultd2:
+            pumpManager.emitAlert(alertType: .patchFaultNotification)
+        case .reservoirEmpty:
+            pumpManager.emitAlert(alertType: .reservoirEmptyNotification)
+        default:
+            break
+        }
+    }
+}

@@ -1,0 +1,98 @@
+import LoopKit
+import SwiftUI
+
+class PreviousPatchDetailsViewModel: PatchLifetimeFormatting, ObservableObject {
+    private let processQueue = DispatchQueue(label: "com.nightscout.medtrumkit.previousPatchDetailsViewModel")
+
+    @Published var patchStateString: String = PatchState.none.description
+    @Published var patchId: String = ""
+    @Published var battery: Double = 0
+    @Published var activatedAt: String = ""
+    @Published var deactivatedAt: String = ""
+    @Published var patchLifetime: String = ""
+    @Published var reservoirLevel: Double? = nil
+    @Published var initialReservoirLevel: Double? = nil
+
+    let reservoirVolumeFormatter: QuantityFormatter = {
+        let formatter = QuantityFormatter(for: .internationalUnit)
+        formatter.numberFormatter.minimumFractionDigits = 0
+        formatter.numberFormatter.maximumFractionDigits = 0
+        return formatter
+    }()
+
+    // LoopUnit has no `.volt` case, so volts are rendered via NumberFormatter + " V".
+    let batteryFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter
+    }()
+
+    let dateTimeFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    let dateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        return formatter
+    }()
+
+    private let pumpManager: MedtrumPumpManager?
+    init(pumpManager: MedtrumPumpManager?) {
+        self.pumpManager = pumpManager
+        super.init()
+
+        guard let pumpManager = pumpManager else {
+            return
+        }
+
+        updateState()
+        pumpManager.addStatusObserver(self, queue: processQueue)
+    }
+
+    deinit {
+        pumpManager?.removeStatusObserver(self)
+    }
+
+    func batteryText(for voltage: Double) -> String {
+        guard let formatted = batteryFormatter.string(from: NSNumber(value: voltage)) else { return "" }
+        return "\(formatted) V"
+    }
+
+    func reservoirText(for units: Double) -> String {
+        let quantity = LoopQuantity(unit: .internationalUnit, doubleValue: units)
+        return reservoirVolumeFormatter.string(from: quantity) ?? ""
+    }
+}
+
+extension PreviousPatchDetailsViewModel: PumpManagerStatusObserver {
+    func pumpManager(
+        _: any LoopKit.PumpManager,
+        didUpdate _: LoopKit.PumpManagerStatus,
+        oldStatus _: LoopKit.PumpManagerStatus
+    ) {
+        updateState()
+    }
+
+    internal func updateState() {
+        guard let pumpManager = self.pumpManager, let previousPatch = pumpManager.state.previousPatch else {
+            return
+        }
+
+        DispatchQueue.main.async {
+            self.patchStateString = (PatchState(rawValue: previousPatch.lastStateRaw) ?? .none).description
+            self.patchId = "\(previousPatch.patchId.toUInt64())"
+            self.activatedAt = self.dateTimeFormatter.string(from: previousPatch.activatedAt)
+            self.deactivatedAt = self.dateTimeFormatter.string(from: previousPatch.deactivatedAt)
+            self.patchLifetime = self.processPatchLifetime(previousPatch.activatedAt, previousPatch.deactivatedAt)
+            self.battery = previousPatch.battery
+            self.reservoirLevel = previousPatch.reservoirLevel
+            self.initialReservoirLevel = previousPatch.initialReservoirLevel
+        }
+    }
+}
