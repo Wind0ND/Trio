@@ -22,6 +22,7 @@ extension SyaiCGMManager: @retroactive CGMManagerUI {
         prefersToSkipUserInteraction _: Bool = false
     ) -> SetupUIResult<CGMManagerViewController, CGMManagerUI> {
         let vc = SyaiUIController(
+            makeManager: { Self.managerForOnboarding() },
             colorPalette: colorPalette,
             displayGlucosePreference: displayGlucosePreference,
             allowDebugFeatures: allowDebugFeatures
@@ -44,11 +45,13 @@ extension SyaiCGMManager: @retroactive CGMManagerUI {
     }
 
     public static var onboardingImage: UIImage? {
-        UIImage(named: "sensor", in: Bundle(for: SyaiUIController.self), compatibleWith: nil)
+        let name = Self.self == OttaiCGMManager.self ? "ottaiSensor" : "sensor"
+        return UIImage(named: name, in: Bundle(for: SyaiUIController.self), compatibleWith: nil)
     }
 
     public var smallImage: UIImage? {
-        UIImage(named: "sensor", in: Bundle(for: SyaiUIController.self), compatibleWith: nil)
+        let name = pluginIdentifier == OttaiCGMManager.pluginIdentifier ? "ottaiSensor" : "sensor"
+        return UIImage(named: name, in: Bundle(for: SyaiUIController.self), compatibleWith: nil)
     }
 
     public var cgmStatusHighlight: DeviceStatusHighlight? {

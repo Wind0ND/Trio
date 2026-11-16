@@ -431,6 +431,12 @@ public final class OttaiCGMManager: SyaiCGMManager {
 }
 
 public extension SyaiCGMManager {
+    /// One onboarding entry point, two catalogue types: whichever type the
+    /// picker handed us is the one that gets built.
+    static func managerForOnboarding() -> SyaiCGMManager {
+        Self.self == OttaiCGMManager.self ? OttaiCGMManager() : SyaiCGMManager()
+    }
+
     /// Sign in to the mainland service with a phone number and SMS code.
     ///
     /// `requestId` comes from `OttaiCnLoginProvider.requestCode`, which must be

@@ -411,7 +411,7 @@ extension DeviceCatalog {
             manufacturer: .ottai,
             name: "Ottai",
             supportedModels: ["M8"],
-            icon: .uiBundle(identifier: "org.loopkit.SyaiKitUI", asset: "sensor")
+            icon: .uiBundle(identifier: "org.loopkit.SyaiKitUI", asset: "ottaiSensor")
         ),
 
         CGMCatalogEntry(.native(.nightscout), manufacturer: .otherSources, icon: .trio(asset: "owl")),

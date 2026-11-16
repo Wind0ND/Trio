@@ -48,12 +48,16 @@ final class SyaiUIController: UINavigationController, CGMManagerOnboarding, Comp
 
     init(
         cgmManager: SyaiCGMManager? = nil,
+        makeManager: @escaping () -> SyaiCGMManager = { SyaiCGMManager() },
         colorPalette: LoopUIColorPalette,
         displayGlucosePreference: DisplayGlucosePreference,
         allowDebugFeatures: Bool
     ) {
         isInitialSetup = cgmManager == nil
-        self.cgmManager = cgmManager ?? SyaiCGMManager()
+        // The picker knows which catalogue entry was tapped; build that exact
+        // manager so the Ottai entry signs in with a phone number while
+        // Syai Ultra keeps email + password.
+        self.cgmManager = cgmManager ?? makeManager()
         self.colorPalette = colorPalette
         self.displayGlucosePreference = displayGlucosePreference
         self.allowDebugFeatures = allowDebugFeatures
