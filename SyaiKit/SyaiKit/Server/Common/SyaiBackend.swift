@@ -23,6 +23,11 @@ public struct SyaiBackend: Sendable {
     /// out identical payloads, so the protocol layer above is shared verbatim.
     public var plainTextTransport: Bool
 
+    /// Mainland Ottai (`api.ottai.com`). Shares the global protocol but differs in
+    /// three places: the bind body, the absence of `jwt/refreshToken`, and the
+    /// prefix the plaintext login calls live under.
+    public let isOttaiCn: Bool
+
     /// JWT session credentials.
     public var credentials: SyaiCredentials
 
@@ -78,7 +83,8 @@ public struct SyaiBackend: Sendable {
         region: String? = nil,
         timeZoneName: String? = nil,
         timeZoneOffsetSeconds: String? = nil,
-        plainTextTransport: Bool = false
+        plainTextTransport: Bool = false,
+        isOttaiCn: Bool = false
     ) {
         self.baseURL = baseURL
         self.pathPrefix = pathPrefix
@@ -99,6 +105,7 @@ public struct SyaiBackend: Sendable {
         self.timeZoneName = timeZoneName ?? Self.deviceTimeZoneName
         self.timeZoneOffsetSeconds = timeZoneOffsetSeconds ?? Self.deviceTimeZoneOffsetSeconds
         self.plainTextTransport = plainTextTransport
+        self.isOttaiCn = isOttaiCn
     }
 
     private static var deviceLanguage: String {
@@ -165,22 +172,30 @@ public struct SyaiBackend: Sendable {
 
     /// Ottai (mainland China) backend.
     ///
-    /// Same BLE protocol and same business endpoints as `syaiTemplate`, but the
-    /// service speaks plaintext JSON at `/cgm/app/server` and rejects anything
-    /// that does not look like the CN Android app: the identities are
-    /// `appName "Ottai"` + `packageName "com.ottai.tag"`, the
-    /// `deviceId` header is `ottai:a:<install id>` and the client claims to be
-    /// Dart on a Samsung A20. `productModel` is `MB`, not `X1`.
+    /// Captured 2026-11-17 from the shipping CN Android app (`com.ottai.tag`,
+    /// Flutter, `ua: Android`, `User-Agent: Dart/3.8`). Two transports are in
+    /// play and they must not be mixed up:
+    ///
+    /// - `user/apiToken`, `user/smsCode`, `user/smsLogin` are **plaintext** GET/POST
+    ///   under `/cgm/app/server` with an md5 `signature` query/body field.
+    /// - Every device endpoint (`validateDeviceByMacV3`, `cgmAuth/verify`,
+    ///   `deviceBind/*`) lives under `/cgm/security/app/server` and **requires the
+    ///   cipher envelope**; the plaintext route answers HTTP 403
+    ///   `NET_SECURITY_PLAINTEXT_ROUTE_FORBIDDEN`.
+    ///
+    /// The identity strings must match the headers byte for byte: `appName` is
+    /// lowercase `ottai` and the `deviceId` is `ottai:a:g:<uuid>` - signing only
+    /// the `g:` suffix (as one earlier port did) fails with 签名校验失败.
     ///
     /// The fallback `deviceId` is what the signatures are computed over, so it
     /// must stay stable across launches for the JWT to remain valid.
     public static let ottaiCnTemplate = SyaiBackend(
         baseURL: URL(string: "https://api.ottai.com")!,
-        pathPrefix: "cgm/app/server",
+        pathPrefix: "cgm/security/app/server",
         productModel: "MB",
         credentials: .placeholder,
-        appName: "Ottai",
-        deviceId: "ottai:a:" + SyaiKeychain.loadOrCreateInstallDeviceId(),
+        appName: "ottai",
+        deviceId: "ottai:a:g:" + SyaiKeychain.loadOrCreateInstallDeviceId(),
         packageName: "com.ottai.tag",
         versionName: "1.55.0",
         versionCode: "263121",
@@ -192,8 +207,12 @@ public struct SyaiBackend: Sendable {
         region: "CN",
         timeZoneName: "Asia/Shanghai",
         timeZoneOffsetSeconds: "28800",
-        plainTextTransport: true
+        isOttaiCn: true
     )
+
+    /// Prefix for the CN plaintext endpoints (login only). The encrypted business
+    /// endpoints use `pathPrefix`.
+    public static let ottaiPlainPathPrefix = "cgm/app/server"
 
     public var isConfigured: Bool { credentials.isConfigured }
 
@@ -269,6 +288,11 @@ public struct SyaiBackend: Sendable {
     /// Full URL for an endpoint under `baseURL/pathPrefix/path`.
     func endpoint(_ path: String) -> URL {
         baseURL.appendingPathComponent(pathPrefix).appendingPathComponent(path)
+    }
+
+    /// Full URL for a CN plaintext endpoint under `baseURL/cgm/app/server/path`.
+    func plainEndpoint(_ path: String) -> URL {
+        baseURL.appendingPathComponent(Self.ottaiPlainPathPrefix).appendingPathComponent(path)
     }
 
     /// Standard header set. `productModel` is opt-in because only `validateDeviceByMacV3`,

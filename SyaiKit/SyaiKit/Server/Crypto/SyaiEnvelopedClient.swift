@@ -281,7 +281,7 @@ public actor SyaiEnvelopedClient {
         if !bypassKnownLockout, accountKnownLockedOut {
             throw TransportError.accountLockedOutElsewhere
         }
-        if backend.plainTextTransport {
+        if backend.isOttaiCn {
             // The CN service mints tokens through `user/apiToken` + `user/smsLogin`
             // only and has no `jwt/refreshToken`, so an expired session can only be
             // re-established by signing in again.
@@ -357,18 +357,8 @@ public actor SyaiEnvelopedClient {
         includeProductModel: Bool = false,
         authed: Bool = true
     ) async throws -> Data {
-        if backend.plainTextTransport {
-            // The CN service exposes these paths as POST only, so a Syai GET
-            // with its body in the cipher query is replayed as a plain POST.
-            return try await plainRequest(
-                url: backend.endpoint(path),
-                method: "POST",
-                bodyJSON: try JSONSerialization.data(withJSONObject: body),
-                extraHeaders: extraHeaders,
-                includeProductModel: includeProductModel,
-                authed: authed
-            )
-        }
+        // Device endpoints on both services require the cipher envelope; the CN
+        // plaintext route answers 403 NET_SECURITY_PLAINTEXT_ROUTE_FORBIDDEN.
         let session = try await ensureSession()
         let bodyJSON = try JSONSerialization.data(withJSONObject: body)
         let env = try SyaiSecureChannel.encryptRequest(session: session, seq: nextSeq(), bodyJSON: bodyJSON)
@@ -451,16 +441,6 @@ public actor SyaiEnvelopedClient {
         authed: Bool,
         method: String = "POST"
     ) async throws -> Data {
-        if backend.plainTextTransport {
-            return try await plainRequest(
-                url: url,
-                method: method,
-                bodyJSON: bodyJSON,
-                extraHeaders: extraHeaders,
-                includeProductModel: includeProductModel,
-                authed: authed
-            )
-        }
         let session = try await ensureSession()
         let env = try SyaiSecureChannel.encryptRequest(session: session, seq: nextSeq(), bodyJSON: bodyJSON)
 
@@ -539,7 +519,7 @@ public actor SyaiEnvelopedClient {
         extraHeaders: [String: String] = [:],
         authed: Bool = false
     ) async throws -> Data {
-        var request = URLRequest(url: backend.endpoint(path))
+        var request = URLRequest(url: backend.plainEndpoint(path))
         request.httpMethod = "GET"
         backend.applyPlainHeaders(&request)
         if authed, let access = backend.credentials.accessToken {
@@ -558,6 +538,23 @@ public actor SyaiEnvelopedClient {
         }
         wireLogResponse(path, response, body: data)
         return data
+    }
+
+    /// Plaintext POST on the CN transport (`user/smsCode`, `user/smsLogin`).
+    func plainPOST(
+        path: String,
+        body: [String: Any],
+        extraHeaders: [String: String] = [:],
+        authed: Bool = false
+    ) async throws -> Data {
+        try await plainRequest(
+            url: backend.plainEndpoint(path),
+            method: "POST",
+            bodyJSON: try JSONSerialization.data(withJSONObject: body),
+            extraHeaders: extraHeaders,
+            includeProductModel: false,
+            authed: authed
+        )
     }
 
     /// Plaintext request on the CN transport: JSON body in the clear, md5-signed

@@ -188,7 +188,7 @@ public extension SyaiEnvelopedClient {
         let ts = SyaiBackend.timestampMillis()
         let apiToken = try await ottaiApiToken()
         let signature = backend.signPlain(timestamp: ts, [phone, apiToken])
-        let data = try await envelopedPOST(
+        let data = try await plainPOST(
             path: "user/smsCode",
             body: [
                 "phoneCode": phoneCode,
@@ -224,7 +224,7 @@ public extension SyaiEnvelopedClient {
     func ottaiSmsLogin(requestId: String, phone: String, code: String) async throws -> OttaiLoginResult {
         let ts = SyaiBackend.timestampMillis()
         let signature = backend.signPlain(timestamp: ts, [requestId, phone, code])
-        let data = try await envelopedPOST(
+        let data = try await plainPOST(
             path: "user/smsLogin",
             body: [
                 "phoneCode": "86",

@@ -124,7 +124,7 @@ public extension SyaiEnvelopedClient {
             "newBindType": 1,
             "deviceInfo": stateInfo
         ]
-        if backend.plainTextTransport {
+        if backend.isOttaiCn {
             // The CN service takes `newBindType: 2`, keys the record to `userId`
             // instead of the JWT `sub`, and has no `deviceInfo` field at all.
             body["newBindType"] = 2
