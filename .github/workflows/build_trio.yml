@@ -180,15 +180,16 @@ jobs:
       name: Check certificates
       uses: ./.github/workflows/create_certs.yml
       secrets: inherit
-      if: |
-        github.event_name == 'workflow_dispatch' ||
-          (vars.SCHEDULED_BUILD != 'false' && needs.check_status.outputs.IS_SECOND_IN_MONTH == 'true') ||
-          (vars.SCHEDULED_SYNC != 'false' && needs.check_status.outputs.NEW_COMMITS == 'true' )
-
+      # Disabled on purpose. Every job in create_certs.yml runs on macos-26, and
+      # GitHub cancels any job that waits more than 15 minutes for a macOS runner.
+      # Probing certificates first meant two separate queue windows per build, so a
+      # lost race discarded an otherwise healthy run. fastlane match inside Build
+      # still creates or renews the distribution certificate when it is missing.
+      if: false
   # Builds Trio
   build:
     name: Build
-    needs: [check_certs, check_status]
+    needs: [check_status]
     runs-on: macos-26
     permissions:
       contents: write
