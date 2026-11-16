@@ -46,6 +46,10 @@ final class SyaiUIController: UINavigationController, CGMManagerOnboarding, Comp
     private let isInitialSetup: Bool
     private var screenStack = [SyaiScreen]()
 
+    /// The Ottai catalogue entry shares this controller but needs its own
+    /// artwork and wording; the manager's concrete type is what tells them apart.
+    private var isOttai: Bool { cgmManager is OttaiCGMManager }
+
     init(
         cgmManager: SyaiCGMManager? = nil,
         makeManager: @escaping () -> SyaiCGMManager = { SyaiCGMManager() },
@@ -115,7 +119,9 @@ final class SyaiUIController: UINavigationController, CGMManagerOnboarding, Comp
         case .onboarding:
             let view = SyaiOnboardingView(
                 onContinue: { [weak self] in self?.proceedToPairingOrLogin() },
-                onShowPlacement: { [weak self] in self?.navigateTo(.placementGuide) }
+                onShowPlacement: { [weak self] in self?.navigateTo(.placementGuide) },
+                imageName: isOttai ? "ottaiSensor" : "sensor",
+                accountName: isOttai ? "Ottai" : "Syai"
             )
             return hostingController(rootView: view, title: String(localized: "Welcome!", comment: "welcome"))
 

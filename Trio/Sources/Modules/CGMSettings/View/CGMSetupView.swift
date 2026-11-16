@@ -1,6 +1,8 @@
 import LoopKit
 import LoopKitUI
 import SwiftUI
+import SyaiKit
+import SyaiKitUI
 import UIKit
 
 extension CGMSettings {
@@ -29,13 +31,24 @@ extension CGMSettings {
             switch CGMType.type {
             case .plugin:
                 if let cgmManagerUIType = pluginCGMManager.getCGMManagerTypeByIdentifier(CGMType.id) {
-                    setupViewController = cgmManagerUIType.setupViewController(
-                        bluetoothProvider: bluetoothManager,
-                        displayGlucosePreference: displayGlucosePreference,
-                        colorPalette: .default,
-                        allowDebugFeatures: false,
-                        prefersToSkipUserInteraction: false
-                    )
+                    if let ottaiType = cgmManagerUIType as? OttaiCGMManager.Type {
+                        // SyaiKitUI's protocol-level setupViewController cannot see the
+                        // concrete type (Self resolves to SyaiCGMManager), so the Ottai
+                        // entry asks for its own onboarding controller explicitly.
+                        setupViewController = ottaiType.makeOttaiSetupViewController(
+                            displayGlucosePreference: displayGlucosePreference,
+                            colorPalette: .default,
+                            allowDebugFeatures: false
+                        )
+                    } else {
+                        setupViewController = cgmManagerUIType.setupViewController(
+                            bluetoothProvider: bluetoothManager,
+                            displayGlucosePreference: displayGlucosePreference,
+                            colorPalette: .default,
+                            allowDebugFeatures: false,
+                            prefersToSkipUserInteraction: false
+                        )
+                    }
                 } else {
                     break
                 }

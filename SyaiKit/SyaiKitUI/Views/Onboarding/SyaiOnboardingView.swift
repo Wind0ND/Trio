@@ -13,6 +13,10 @@ struct SyaiOnboardingView: View {
     @Environment(\.dismissAction) private var dismiss
     let onContinue: () -> Void
     let onShowPlacement: () -> Void
+    /// The Ottai catalogue entry reuses this screen with its own artwork and
+    /// account name, so neither is hard-coded here.
+    var imageName: String = "sensor"
+    var accountName: String = "Syai"
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -21,7 +25,7 @@ struct SyaiOnboardingView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Spacer()
-                            Image(imageName: "sensor")
+                            Image(imageName: imageName)
                                 .resizable()
                                 .scaledToFit()
                                 .frame(height: 150)
@@ -31,7 +35,7 @@ struct SyaiOnboardingView: View {
                         Text("Before you begin", comment: "onboarding header")
                             .font(.title3).bold()
                         Text(
-                            "Apply the sensor and sign in to your Syai account. Then, you can activate the sensor and read from it directly in the app.",
+                            "Apply the sensor and sign in to your \(accountName) account. Then, you can activate the sensor and read from it directly in the app.",
                             comment: "onboarding BYOA explanation"
                         )
                     }

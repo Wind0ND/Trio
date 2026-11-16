@@ -136,6 +136,26 @@ extension SyaiCGMManager: @retroactive CGMManagerUI {
     }
 }
 
+public extension OttaiCGMManager {
+    /// Non-protocol factory. `setupViewController` is a static protocol
+    /// requirement, so `Self` inside it resolves to `SyaiCGMManager` no matter
+    /// which catalogue entry was tapped. The host calls this directly when the
+    /// tapped type is Ottai, which is a plain compile-time static call.
+    static func makeOttaiSetupViewController(
+        displayGlucosePreference: DisplayGlucosePreference,
+        colorPalette: LoopUIColorPalette,
+        allowDebugFeatures: Bool
+    ) -> SetupUIResult<CGMManagerViewController, CGMManagerUI> {
+        let vc = SyaiUIController(
+            makeManager: { OttaiCGMManager() },
+            colorPalette: colorPalette,
+            displayGlucosePreference: displayGlucosePreference,
+            allowDebugFeatures: allowDebugFeatures
+        )
+        return .userInteractionRequired(vc)
+    }
+}
+
 private struct SyaiDeviceStatusBadge: DeviceStatusBadge {
     var image: UIImage? = UIImage(systemName: "exclamationmark.triangle")
     var state: DeviceStatusBadgeState = .critical

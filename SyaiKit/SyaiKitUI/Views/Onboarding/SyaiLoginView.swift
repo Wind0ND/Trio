@@ -148,7 +148,10 @@ struct SyaiLoginView: View {
                     .font(.system(size: 34))
                     .foregroundColor(.accentColor)
             }
-            Text("Sign in to Syai", comment: "login header")
+            Text(
+                viewModel.mode == .phone ? "Sign in to Ottai" : "Sign in to Syai",
+                comment: "login header"
+            )
                 .font(.title2).bold()
         }
         .frame(maxWidth: .infinity)
