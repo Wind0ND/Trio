@@ -1,8 +1,10 @@
+import AVFoundation
 import BackgroundTasks
 import CoreData
 import Foundation
 import SwiftUI
 import Swinject
+import UserNotifications
 
 extension Notification.Name {
     static let initializationCompleted = Notification.Name("initializationCompleted")
@@ -400,6 +402,7 @@ extension Notification.Name {
             .developmentBranchWarning(developmentBranchAlerter)
         }
         .onChange(of: scenePhase) { _, newScenePhase in
+            BackgroundKeepAlive.shared.handleScenePhase(newScenePhase)
             info(.lifecycle, "Scene phase changed to \(newScenePhase)")
 
             /// If the App goes to the background we should ensure that all the changes are saved from the viewContext to the Persistent Container
@@ -552,6 +555,181 @@ extension Notification.Name {
     }
 }
 
+
+/// Keeps the process resident while CGM readings have stalled.
+///
+/// iOS suspends a backgrounded app, which also parks the BLE reconnect path. Playing a
+/// silent stream keeps the audio session active and the process resident, so the CGM
+/// pipeline can recover by itself instead of waiting for the next wake-up.
+final class BackgroundKeepAlive {
+    static let shared = BackgroundKeepAlive()
+
+    enum Mode: String, CaseIterable, Identifiable {
+        case off
+        case smart
+        case always
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .off: return "关闭"
+            case .smart: return "智能（掉线时才保活）"
+            case .always: return "常驻（后台一直保活）"
+            }
+        }
+    }
+
+    private enum Keys {
+        static let mode = "backgroundKeepAlive.mode"
+        static let stallMinutes = "backgroundKeepAlive.stallMinutes"
+        static let lastGlucoseAt = "backgroundKeepAlive.lastGlucoseAt"
+        static let maxSessionMinutes = "backgroundKeepAlive.maxSessionMinutes"
+    }
+
+    /// Hard stop for a smart-mode window: long enough to ride out a sensor gap, short
+    /// enough that a signal which never comes back cannot drain the battery all night.
+    /// Always mode has no cap; it runs until the app returns to the foreground.
+    private var maxSession: TimeInterval {
+        let stored = defaults.integer(forKey: Keys.maxSessionMinutes)
+        return TimeInterval((stored == 0 ? 45 : stored) * 60)
+    }
+
+    private let defaults = UserDefaults.standard
+    private let engine = AVAudioEngine()
+    private var sourceNode: AVAudioSourceNode?
+    private var watchdog: Timer?
+    private var startedAt: Date?
+
+    private(set) var isKeepingAlive = false
+
+    private init() {}
+
+    /// Called from the scene-phase observer. `.inactive` appears on both edges, so only
+    /// `.active` counts as being back in front.
+    func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            evaluateForBackground()
+        case .active:
+            stop()
+        default:
+            break
+        }
+    }
+
+    /// Called by the glucose store for every batch. A fresh reading also ends a smart-mode
+    /// window, because the pipeline is demonstrably alive again.
+    func noteGlucoseArrival() {
+        defaults.set(Date(), forKey: Keys.lastGlucoseAt)
+        if isKeepingAlive, currentMode == .smart {
+            stop()
+        }
+    }
+
+    private var currentMode: Mode {
+        Mode(rawValue: defaults.string(forKey: Keys.mode) ?? "") ?? .smart
+    }
+
+    private func evaluateForBackground() {
+        switch currentMode {
+        case .off:
+            return
+        case .always:
+            start()
+        case .smart:
+            let stored = defaults.integer(forKey: Keys.stallMinutes)
+            let stall = stored == 0 ? 10 : stored
+            let last = defaults.object(forKey: Keys.lastGlucoseAt) as? Date
+            let age = last.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
+            if age >= TimeInterval(stall * 60) {
+                start()
+            }
+        }
+    }
+
+    private func start() {
+        guard !isKeepingAlive else { return }
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            return
+        }
+
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) else {
+            return
+        }
+
+        let node = AVAudioSourceNode(format: format) { _, _, _, audioBufferList -> OSStatus in
+            for buffer in UnsafeMutableAudioBufferListPointer(audioBufferList) {
+                memset(buffer.mData, 0, Int(buffer.mDataByteSize))
+            }
+            return noErr
+        }
+
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        engine.mainMixerNode.outputVolume = 0
+
+        do {
+            try engine.start()
+        } catch {
+            engine.detach(node)
+            return
+        }
+
+        sourceNode = node
+        startedAt = Date()
+        isKeepingAlive = true
+        scheduleWatchdog()
+    }
+
+    private func stop() {
+        guard isKeepingAlive else { return }
+
+        watchdog?.invalidate()
+        watchdog = nil
+
+        engine.stop()
+        if let node = sourceNode {
+            engine.detach(node)
+            sourceNode = nil
+        }
+
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+
+        isKeepingAlive = false
+        startedAt = nil
+    }
+
+    private func scheduleWatchdog() {
+        watchdog?.invalidate()
+        watchdog = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self, let started = self.startedAt else { return }
+            guard self.currentMode == .smart else { return }
+            if Date().timeIntervalSince(started) >= self.maxSession {
+                self.stop()
+                self.notifyStallExpired()
+            }
+        }
+    }
+
+    private func notifyStallExpired() {
+        let content = UNMutableNotificationContent()
+        content.title = "血糖数据中断"
+        content.body = "Trio 连续 \(Int(maxSession / 60)) 分钟没有收到血糖数据，后台保活已停止。请检查 CGM 连接。"
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "background-keep-alive-expired",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+}
 public extension Bundle {
     var appDevVersion: String? {
         object(forInfoDictionaryKey: "AppDevVersion") as? String

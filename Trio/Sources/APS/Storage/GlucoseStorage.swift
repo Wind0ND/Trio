@@ -41,6 +41,12 @@ final class BaseGlucoseStorage: GlucoseStorage, Injectable {
         updateSubject.eraseToAnyPublisher()
     }
 
+    /// Fans out the update and tells the keep-alive service that data is flowing again.
+    private func notifyGlucoseArrival() {
+        updateSubject.send()
+        BackgroundKeepAlive.shared.noteGlucoseArrival()
+    }
+
     private enum Config {
         static let filterTime: TimeInterval = 3.5 * 60
         static let minimumGlucose: Int = 39
@@ -218,7 +224,7 @@ final class BaseGlucoseStorage: GlucoseStorage, Injectable {
 
         guard context.hasChanges else { return }
         try context.save()
-        updateSubject.send()
+        notifyGlucoseArrival()
     }
 
     private func storeGlucoseBatch(_ glucose: [BloodGlucose], context: NSManagedObjectContext) throws {
@@ -237,7 +243,7 @@ final class BaseGlucoseStorage: GlucoseStorage, Injectable {
             }
         )
         try context.execute(batchInsert)
-        updateSubject.send()
+        notifyGlucoseArrival()
     }
 
     private func configureGlucoseEntry(_ entry: GlucoseStored, with glucose: BloodGlucose) {
@@ -336,7 +342,7 @@ final class BaseGlucoseStorage: GlucoseStorage, Injectable {
                 try context.save()
 
                 // Glucose subscribers already listen to the update publisher, so call here to update glucose-related data.
-                self.updateSubject.send()
+                self.notifyGlucoseArrival()
             } catch let error as NSError {
                 warning(.storage, "Saving manual glucose failed", error: error)
             }
