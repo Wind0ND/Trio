@@ -595,6 +595,14 @@ final class BackgroundKeepAlive {
         return TimeInterval((stored == 0 ? 45 : stored) * 60)
     }
 
+    /// Minutes of silence before the system reminder comes due.
+    private var stallMinutes: Int {
+        let stored = defaults.integer(forKey: Keys.stallMinutes)
+        return stored == 0 ? 10 : stored
+    }
+
+    private static let stallNoticeID = "background-keep-alive-stall"
+
     private let defaults = UserDefaults.standard
     private let engine = AVAudioEngine()
     private var sourceNode: AVAudioSourceNode?
@@ -622,9 +630,38 @@ final class BackgroundKeepAlive {
     /// window, because the pipeline is demonstrably alive again.
     func noteGlucoseArrival() {
         defaults.set(Date(), forKey: Keys.lastGlucoseAt)
+        scheduleStallNotice()
         if isKeepingAlive, currentMode == .smart {
             stop()
         }
+    }
+
+    /// Hands the "no data" reminder to the system while this process is still awake.
+    ///
+    /// A pending UNNotificationRequest lives in SpringBoard, so it still fires after iOS
+    /// has suspended or killed the app -- including a swipe-up termination, where nothing
+    /// of ours survives. One XPC call per reading, no timer, nothing resident.
+    func scheduleStallNotice(after delay: TimeInterval? = nil) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.stallNoticeID])
+        guard currentMode != .off else { return }
+
+        let minutes = stallMinutes
+        let wait = delay ?? TimeInterval(minutes * 60)
+        guard wait >= 5 else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "血糖数据中断"
+        content.body = "已经 \(minutes) 分钟没有收到新的血糖数据。请打开 Trio 检查 CGM 连接。"
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+
+        let request = UNNotificationRequest(
+            identifier: Self.stallNoticeID,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: wait, repeats: false)
+        )
+        center.add(request)
     }
 
     private var currentMode: Mode {
@@ -634,16 +671,19 @@ final class BackgroundKeepAlive {
     private func evaluateForBackground() {
         switch currentMode {
         case .off:
+            scheduleStallNotice()
             return
         case .always:
             start()
+            scheduleStallNotice()
         case .smart:
-            let stored = defaults.integer(forKey: Keys.stallMinutes)
-            let stall = stored == 0 ? 10 : stored
             let last = defaults.object(forKey: Keys.lastGlucoseAt) as? Date
             let age = last.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
-            if age >= TimeInterval(stall * 60) {
+            let remaining = TimeInterval(stallMinutes * 60) - age
+            if remaining <= 0 {
                 start()
+            } else {
+                scheduleStallNotice(after: remaining)
             }
         }
     }
