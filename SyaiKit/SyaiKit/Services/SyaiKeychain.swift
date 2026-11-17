@@ -63,8 +63,8 @@ public enum SyaiKeychain {
         return try? JSONDecoder().decode(SyaiAccountSession.self, from: data)
     }
 
-    public static func deleteAccount() {
-        delete(account: accountSessionKey)
+    public static func deleteAccount(namespace: String = "") {
+        delete(account: accountKey(namespace))
     }
 
     private static func save(_ data: Data, account: String) {
